@@ -3,12 +3,16 @@ const http = require('http');
 const { Server } = require('socket.io');
 
 const app = express();
-app.use(express.static('public')); // serverer skjermtid.html
+app.use(express.static('public')); // serves public/skjermtid.html
+
+// optional: root redirect + healthcheck
+app.get('/', (req, res) => res.redirect('/skjermtid.html'));
+app.get('/healthz', (req, res) => res.type('text').send('ok'));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// Sett SYNC_KEY i Render dashboard -> Environment
+// server-side gate via SYNC_KEY (set in Render -> Environment)
 const SYNC_KEY = process.env.SYNC_KEY || '';
 const snapshots = new Map(); // familyId -> { family, state }
 
@@ -44,5 +48,5 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; // DO NOT hardcode 10000
 server.listen(PORT, () => console.log('listening on ' + PORT));
