@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Skjermtid</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Skjermtid">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%23222'/><text x='50%' y='52%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='96' fill='white'>⏳</text></svg>">
+
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--warn:#f59e0b;--danger:#ef4444;--blue:#3b82f6;--border:#1f2937}
+    .light{--bg:#f8fafc;--card:#ffffff;--muted:#475569;--text:#0f172a;--accent:#16a34a;--warn:#d97706;--danger:#dc2626;--blue:#2563eb;--border:#e2e8f0}
+    html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
+    .wrap{max-width:980px;margin:0 auto;padding:env(safe-area-inset-top) 12px calc(16px + env(safe-area-inset-bottom))}
+    header{position:sticky;top:0;background:var(--bg);opacity:.98;backdrop-filter:saturate(1.1) blur(6px);z-index:10;padding:8px 0 6px}
+    h1{margin:6px 0 0;font-size:28px;letter-spacing:.3px}
+    .grid{display:grid;gap:12px}
+    .cards{grid-template-columns:repeat(3,minmax(240px,1fr))}
+    @media (max-width:860px){.cards{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:14px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .grow{flex:1}
+    .muted{color:var(--muted)}
+    button,input,select{border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--text);padding:10px 12px;font-size:16px}
+    button{cursor:pointer}
+    button.primary{background:var(--accent);border-color:#065f46;color:#fff}
+    button.warn{background:var(--warn);border-color:#92400e;color:#fff}
+    button.danger{background:var(--danger);border-color:#7f1d1d;color:#fff}
+    button.blue{background:var(--blue);border-color:#1e3a8a;color:#fff}
+    .timer{font-variant-numeric:tabular-nums;font-weight:800;font-size:38px}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:12px}
+    .seg{display:flex;gap:8px;align-items:center}
+    .list{display:flex;flex-direction:column;gap:8px}
+    details{background:transparent;border:1px dashed #334155;padding:8px 10px;border-radius:12px}
+    summary{cursor:pointer}
+    .lock{position:sticky;right:12px;top:8px}
+    .ok{color:var(--accent)} .amber{color:var(--warn)} .red{color:var(--danger)}
+    .pill{border-radius:999px;padding:6px 10px;background:transparent;border:1px solid var(--border)}
+    .small{font-size:12px}
+    .kiosk{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;padding:20px}
+    .kiosk .inner{background:var(--card);border:1px solid var(--border);border-radius:18px;max-width:620px;width:100%;padding:18px;text-align:center}
+    .note{font-size:12px;color:#9ca3af}
+    .avatar{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-size:30px;font-weight:800;border:2px solid var(--border)}
+    .head{display:flex;gap:10px;align-items:center}
+    .adminOnly{display:none}
+    .admin .adminOnly{display:initial}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="row">
+      <div class="grow">
+        <h1>⏳ Skjermtid</h1>
+        <div class="muted small">Lokal data på enheten. Synk via server kun for hendelser/snapshots.</div>
+      </div>
+      <div class="row lock">
+        <button id="themeToggle" class="pill" title="Bytt tema">🌓 Tema</button>
+        <span id="adminStatus" class="badge">Låst (foreldre kreves)</span>
+        <button id="toggleAdmin" class="blue">Lås opp</button>
+      </div>
+    </header>
+
+    <section class="grid cards" id="children"></section>
+
+    <section class="grid" style="margin-top:12px">
+      <div class="card adminOnly">
+        <div class="row head"><h2 class="grow">🎯 Oppdrag (tjen skjermtid)</h2>
+          <button class="primary" id="addQuestBtn">Nytt oppdrag</button></div>
+        <div id="quests" class="list"></div>
+      </div>
+
+      <div class="card">
+        <div class="row head"><h2 class="grow">💡 Lekeforslag</h2>
+          <button class="primary" id="surpriseBtn">Gi meg en lek!</button>
+        </div>
+      </div>
+
+      <div class="card adminOnly">
+        <div class="row head"><h2 class="grow">⚙️ Innstillinger</h2></div>
+        <div class="list">
+          <div class="row">
+            <label class="pill">Daglig kvote (min): <input id="dailyMins" type="number" min="0" step="5" style="width:110px;margin-left:10px"></label>
+            <label class="pill">Døgnreset kl: <input id="resetHour" type="time" style="margin-left:10px"></label>
+            <label class="pill">Tema: <select id="themeSelect" style="margin-left:10px"><option value="dark">Mørkt</option><option value="light">Lyst</option></select></label>
+          </div>
+          <div class="row">
+            <label class="pill">Admin-PIN: <input id="pinInput" type="password" pattern="[0-9]*" inputmode="numeric" style="width:120px;margin-left:10px" placeholder="4–8 siffer"></label>
+            <button id="saveSettings" class="primary">Lagre</button>
+            <button id="resetToday" class="warn">Nullstill i dag</button>
+            <button id="hardReset" class="danger">Fabrikkreset</button>
+          </div>
+          <div class="row">
+            <button id="exportBtn" class="pill">Eksporter data</button>
+            <label class="pill">Importer <input id="importFile" type="file" accept="application/json"></label>
+            <span class="note">Tips: Ta en eksport som sikkerhetskopi ca. ukentlig.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="kiosk" id="kiosk">
+    <div class="inner">
+      <h2 id="kioskTitle">Melding</h2>
+      <div id="kioskImg" style="font-size:64px; margin:10px 0"></div>
+      <p id="kioskBody" class="muted" style="font-size:20px"></p>
+      <div class="row" style="justify-content:center; margin-top:10px"><button id="kioskClose" class="primary">OK</button></div>
+    </div>
+  </div>
+
+  <audio id="ding" preload="auto">
+    <source src="data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" type="audio/mpeg">
+  </audio>
+
+  <script>
+  const $ = function(sel){ return document.querySelector(sel); };
+  const qsa = function(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+  const fmt = function(ms){ var s=Math.max(0,Math.floor(ms/1000)); var h=Math.floor(s/3600); var m=Math.floor((s%3600)/60); var ss=s%60; return (h>0? String(h).padStart(2,'0')+':':'')+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); };
+  const clone = function(o){ return JSON.parse(JSON.stringify(o)); };
+
+  const DEFAULT = {
+    pinHash:'', pinSalt:'', resetHour:'05:00', dailyMins:120, theme:'dark',
+    children:[
+      {id:'c1',name:'Leah',gender:'girl',color:'#f472b6',remaining:120*60*1000,running:false,lastTick:0},
+      {id:'c2',name:'Lucas',gender:'boy',color:'#22c55e',remaining:120*60*1000,running:false,lastTick:0},
+      {id:'c3',name:'Live',gender:'girl',color:'#facc15',remaining:120*60*1000,running:false,lastTick:0}
+    ],
+    quests:[ {id:'q1',title:'Rydde rom',minutes:10,active:true}, {id:'q2',title:'Pusse tenner',minutes:5,active:true}, {id:'q3',title:'Hjelpe med middag',minutes:10,active:true} ],
+    lastResetISO:'', lastBackupISO:''
+  };
+
+  const FUN = [
+    {text:'Hinderløype', emoji:'🧗'},
+    {text:'Skattejakt', emoji:'🗺️'},
+    {text:'Kaste ball', emoji:'🏈'},
+    {text:'Danselek', emoji:'💃'},
+    {text:'Stoppleken', emoji:'🛑'},
+    {text:'Tegne', emoji:'🖍️'},
+    {text:'Lego', emoji:'🧱'},
+    {text:'Puslespill', emoji:'🧩'},
+    {text:'Sanglek', emoji:'🎤'},
+    {text:'Papirfly', emoji:'🛩️'}
+  ];
+
+  var state = load();
+  applyTheme(state.theme);
+  ensureDailyReset();
+  var admin = false; // start låst
+  updateAdminClass();
+
+  function load(){
+    try{
+      var raw = localStorage.getItem('skjermtid-state');
+      var obj;
+      if(!raw){
+        obj = clone(DEFAULT);
+        initDefaultPin(obj);
+        obj.lastResetISO = new Date().toISOString();
+        localStorage.setItem('skjermtid-state', JSON.stringify(obj));
+        return obj;
+      }
+      obj = JSON.parse(raw);
+      if('pin' in obj){ migratePlainPin(obj); saveObj(obj); }
+      if(!obj.pinHash || !obj.pinSalt){ initDefaultPin(obj); saveObj(obj); }
+      if(!obj.theme) obj.theme='dark';
+      return obj;
+    }catch(e){ var obj2=clone(DEFAULT); initDefaultPin(obj2); return obj2; }
+  }
+  function save(){ saveObj(state); }
+  function saveObj(o){ localStorage.setItem('skjermtid-state', JSON.stringify(o)); }
+
+  function randSalt(len){ var b=new Uint8Array(len||16); (self.crypto||window.crypto).getRandomValues(b); return bufToBase64(b.buffer); }
+  function bufToBase64(buf){ var s=''; var b=new Uint8Array(buf); for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]); return btoa(s); }
+  function base64ToBuf(b64){ var s=atob(b64); var b=new Uint8Array(s.length); for(var i=0;i<s.length;i++) b[i]=s.charCodeAt(i); return b.buffer; }
+  async function sha256Base64(str){ if(!(crypto&&crypto.subtle)){ return btoa(unescape(encodeURIComponent(str))).slice(0,32); } var d=new TextEncoder().encode(str); var h=await crypto.subtle.digest('SHA-256', d); return bufToBase64(h); }
+  async function hashPin(pin, salt){ return sha256Base64(salt+':'+pin); }
+  function timingSafeEqualB64(a,b){ var ab=new Uint8Array(base64ToBuf(a)); var bb=new Uint8Array(base64ToBuf(b)); if(ab.length!==bb.length){ var acc=ab.length^bb.length; var L=Math.max(ab.length,bb.length); for(var i=0;i<L;i++){ var av=ab[i]|0, bv=bb[i]|0; acc|=(av^bv); } return acc===0; } var out=0; for(var j=0;j<ab.length;j++) out|=(ab[j]^bb[j]); return out===0; }
+
+  function initDefaultPin(o){ o.pinSalt = randSalt(); hashPin('1234', o.pinSalt).then(function(h){ o.pinHash=h; saveObj(o); }); }
+  function migratePlainPin(o){ var p=o.pin||'1234'; delete o.pin; o.pinSalt = randSalt(); hashPin(p, o.pinSalt).then(function(h){ o.pinHash=h; saveObj(o); }); }
+
+  function ensureDailyReset(){
+    var tzNow = new Date();
+    var hm = state.resetHour.split(':'); var h=+hm[0]||0, m=+hm[1]||0;
+    var last = new Date(state.lastResetISO||0);
+    var today = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate(), h, m, 0, 0);
+    var yesterday = new Date(today.getTime()-24*3600*1000);
+    var needs = (last < yesterday) || (last < today && tzNow >= today);
+    if(needs){
+      state.children.forEach(function(c){ c.remaining = state.dailyMins*60*1000; c.running=false; c.lastTick=0; });
+      state.lastResetISO = tzNow.toISOString();
+      save();
+    }
+  }
+
+  function avatarEmoji(g){ return g==='boy' ? '👦' : '👧'; }
+
+  function render(){
+    var dm = $('#dailyMins'); if(dm) dm.value = state.dailyMins;
+    var rh = $('#resetHour'); if(rh) rh.value = state.resetHour;
+    var pi = $('#pinInput'); if(pi) pi.value = '';
+    var ts = $('#themeSelect'); if(ts) ts.value = state.theme;
+
+    var cont = $('#children');
+    cont.innerHTML = '';
+    state.children.forEach(function(c){
+      var used = Math.max(0, state.dailyMins*60*1000 - c.remaining);
+      var pct = Math.min(100, Math.round(100*used/(state.dailyMins*60*1000)));
+      var warnClass = c.remaining <= 10*60*1000 ? 'amber' : (c.remaining<=0? 'red':'ok');
+      var el = document.createElement('div');
+      el.className = 'card';
+      el.style.borderTop = '6px solid '+c.color;
+      el.innerHTML =
+        '<div class="row" style="align-items:center;gap:12px">'+
+          '<div class="avatar" style="background:'+c.color+'33">'+avatarEmoji(c.gender)+'</div>'+
+          '<div class="grow">'+
+            '<div class="row" style="align-items:center">'+
+              '<h2 class="grow">'+c.name+'</h2>'+
+              '<span class="badge">Brukt: '+fmt(used)+'</span>'+
+              '<span class="badge">'+pct+'%</span>'+
+              '<button class="pill warn adminOnly" data-id="'+c.id+'" data-act="add5">+5</button>'+
+            '</div>'+
+            '<div class="timer '+warnClass+'">'+fmt(c.remaining)+'</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="row seg" style="margin-top:8px">'+
+          '<button class="blue" data-id="'+c.id+'" data-act="start" '+(c.running||c.remaining<=0?'disabled':'')+'>Start</button>'+
+          '<button data-id="'+c.id+'" data-act="pause" '+(!c.running?'disabled':'')+'>Pause</button>'+
+          '<button class="warn adminOnly" data-id="'+c.id+'" data-act="add10">+10</button>'+
+          '<button class="danger adminOnly" data-id="'+c.id+'" data-act="minus5">-5</button>'+
+        '</div>'+
+        '<details class="adminOnly" style="margin-top:8px">'+
+          '<summary>Mer...</summary>'+
+          '<div class="row" style="margin-top:8px">'+
+            '<label class="pill">Nytt navn: <input data-id="'+c.id+'" data-act="rename" value="'+c.name+'"></label>'+
+            '<label class="pill">Sett gjenværende (min): <input data-id="'+c.id+'" data-act="setmins" type="number" min="0" step="1"></label>'+
+            '<button class="warn" data-id="'+c.id+'" data-act="resetOne">Nullstill til daglig kvote</button>'+
+          '</div>'+
+        '</details>';
+      cont.appendChild(el);
+    });
+
+    var qwrap = $('#quests'); if(qwrap){
+      qwrap.innerHTML='';
+      state.quests.forEach(function(q){
+        var row = document.createElement('div');
+        row.className='row';
+        row.innerHTML =
+          '<input class="pill grow" value="'+q.title+'" data-qid="'+q.id+'" data-act="qtitle">'+
+          '<span class="pill">'+q.minutes+' min</span>'+
+          '<button class="primary" data-qid="'+q.id+'" data-act="grant">Gi tid</button>'+
+          '<button class="danger" data-qid="'+q.id+'" data-act="qdel">Slett</button>';
+        qwrap.appendChild(row);
+      });
+    }
+
+    $('#adminStatus').textContent = admin ? 'Åpen (foreldre)' : 'Låst (foreldre kreves)';
+    $('#toggleAdmin').textContent = admin ? 'Lås' : 'Lås opp';
+  }
+
+  function updateAdminClass(){ document.body.classList.toggle('admin', admin); }
+
+  $('#toggleAdmin').addEventListener('click', async function(){
+    if(admin){ admin=false; updateAdminClass(); render(); return; }
+    var attempt = prompt('Foreldre-PIN');
+    if(attempt==null) return;
+    var h = await hashPin(String(attempt), state.pinSalt);
+    if(timingSafeEqualB64(h, state.pinHash)){ admin=true; updateAdminClass(); render(); }
+    else alert('Feil PIN');
+  });
+
+  $('#themeToggle').addEventListener('click', function(){ state.theme = (state.theme==='dark'?'light':'dark'); applyTheme(state.theme); save(); });
+  var themeSel = $('#themeSelect'); if(themeSel){ themeSel.addEventListener('change', function(e){ state.theme=e.target.value; applyTheme(state.theme); save(); }); }
+  function applyTheme(mode){ document.body.classList.toggle('light', mode==='light'); }
+
+  document.body.addEventListener('click', function(e){
+    var t=e.target;
+    if(t.matches && t.matches('[data-act]')){
+      var act=t.dataset.act;
+      if(act==='start') startTimer(t.dataset.id);
+      if(act==='pause') pauseTimer(t.dataset.id);
+      if(act==='add5') addMinutes(t.dataset.id,5);
+      if(act==='add10') addMinutes(t.dataset.id,10);
+      if(act==='minus5') addMinutes(t.dataset.id,-5);
+      if(act==='resetOne') resetOne(t.dataset.id);
+      if(act==='grant') grantQuest(t.dataset.qid);
+      if(act==='qdel') delQuest(t.dataset.qid);
+    }
+    if(t.id==='addQuestBtn') addQuest();
+    if(t.id==='saveSettings') saveSettings();
+    if(t.id==='resetToday') resetToday();
+    if(t.id==='hardReset') hardReset();
+    if(t.id==='exportBtn') exportData();
+    if(t.id==='kioskClose') hideKiosk();
+    if(t.id==='surpriseBtn') showRandomFun();
+  });
+
+  document.body.addEventListener('input', function(e){
+    var t=e.target;
+    if(t.dataset.act==='rename'){
+      var c = state.children.find(function(x){ return x.id===t.dataset.id; }); if(!c) return;
+      var old=c.name; c.name=t.value; save();
+    }
+    if(t.dataset.act==='setmins'){
+      var c2 = state.children.find(function(x){ return x.id===t.dataset.id; }); if(!c2) return; var v=+t.value||0; c2.remaining=v*60*1000; save(); render();
+    }
+    if(t.dataset.act==='qtitle'){
+      var q = state.quests.find(function(x){ return x.id===t.dataset.qid; }); if(!q) return; q.title=t.value; save();
+    }
+  });
+
+  $('#importFile').addEventListener('change', async function(e){
+    var file = e.target.files[0]; if(!file) return;
+    var txt = await file.text();
+    try{
+      var data = JSON.parse(txt);
+      if('pin' in data){ migratePlainPin(data); }
+      if(!data.pinHash || !data.pinSalt){ initDefaultPin(data); }
+      if(!data.children || !Array.isArray(data.children)) throw new Error('Ugyldig fil');
+      if(!data.theme) data.theme='dark';
+      state = data; save(); ensureDailyReset(); applyTheme(state.theme); render(); alert('Importert.');
+    }catch(err){ alert('Kunne ikke importere: '+err.message); }
+  });
+
+  function exportData(){
+    state.lastBackupISO = new Date().toISOString(); save();
+    var blob = new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href=url; a.download='skjermtid-data.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
+  function startTimer(id){ var c=state.children.find(function(x){return x.id===id;}); if(!c||c.running||c.remaining<=0) return; c.running=true; c.lastTick=Date.now(); save(); render(); }
+  function pauseTimer(id){ var c=state.children.find(function(x){return x.id===id;}); if(!c||!c.running) return; tickChild(c); c.running=false; save(); render(); }
+  function addMinutes(id,mins){ var c=state.children.find(function(x){return x.id===id;}); if(!c) return; c.remaining = Math.max(0, c.remaining + mins*60*1000); save(); render(); }
+  function resetOne(id){ var c=state.children.find(function(x){return x.id===id;}); if(!c) return; c.remaining = state.dailyMins*60*1000; c.running=false; c.lastTick=0; save(); render(); }
+  function tickChild(c){ if(!c.running) return; var nowT=Date.now(); var dt=nowT-(c.lastTick||nowT); c.lastTick=nowT; c.remaining=Math.max(0,c.remaining-dt); if(c.remaining===0){ c.running=false; timeUp(c.name); } }
+
+  setInterval(function(){
+    ensureDailyReset();
+    state.children.forEach(tickChild);
+    save();
+    qsa('#children .card').forEach(function(card,i){
+      var c=state.children[i];
+      var timer=card.querySelector('.timer'); if(timer) timer.textContent=fmt(c.remaining);
+      if(c.remaining<=10*60*1000) timer.classList.add('amber'); else timer.classList.remove('amber');
+      if(c.remaining<=0) timer.classList.add('red');
+    });
+    maybeBackupNudge();
+  }, 1000);
+
+  function maybeBackupNudge(){
+    var last = state.lastBackupISO ? new Date(state.lastBackupISO) : null;
+    if(!last){ return; }
+    var days = (Date.now() - last.getTime())/86400000;
+    if(days>7){ showKiosk('Husk sikkerhetskopi', 'Det er over en uke siden sist du eksporterte data. Trykk Eksporter i Innstillinger.','💾'); }
+  }
+
+  function timeUp(name){ try{ $('#ding').currentTime = 0; $('#ding').play(); }catch(e){} showKiosk('Tid er ute', name+' sin skjermtid er brukt opp for i dag.'); }
+  function showKiosk(title, body, emoji){ $('#kioskTitle').textContent=title; $('#kioskBody').textContent=body||''; $('#kioskImg').textContent=emoji||''; $('#kiosk').style.display='flex'; }
+  function hideKiosk(){ $('#kiosk').style.display='none'; }
+
+  function uid(){ return Math.random().toString(36).slice(2,9); }
+  function addQuest(){ if(!admin) return; var title=prompt('Navn på oppdrag'); if(!title) return; var minutes=+prompt('Minutter skjermtid (heltall)')||0; state.quests.push({id:uid(), title:title, minutes:minutes, active:true}); save(); render(); }
+  function delQuest(id){ if(!admin) return; state.quests = state.quests.filter(function(q){return q.id!==id;}); save(); render(); }
+  function grantQuest(qid){ if(!admin) return; var q=state.quests.find(function(x){return x.id===qid;}); if(!q) return; var childId = prompt('Hvem? (skriv 1,2,3)'); var idx = ({'1':0,'2':1,'3':2})[childId]; if(idx==null) return; addMinutes(state.children[idx].id, q.minutes); }
+
+  function showRandomFun(){ var pick = FUN[Math.floor(Math.random()*FUN.length)]; showKiosk(pick.text, '', pick.emoji); }
+
+  async function saveSettings(){
+    if(!admin) return;
+    var dm = +($('#dailyMins').value)||0; state.dailyMins=dm;
+    var rh=$('#resetHour').value||'05:00'; state.resetHour=rh;
+    var pin=$('#pinInput').value.trim(); if(pin){ state.pinSalt = randSalt(); state.pinHash = await hashPin(pin, state.pinSalt); $('#pinInput').value=''; }
+    state.children.forEach(function(c){ if(c.remaining>dm*60*1000) c.remaining=dm*60*1000; });
+    save(); render();
+  }
+  function resetToday(){ if(!admin) return; if(confirm('Nullstille alle til daglig kvote?')){ state.children.forEach(function(c){ c.remaining=state.dailyMins*60*1000; c.running=false; c.lastTick=0; }); state.lastResetISO = new Date().toISOString(); save(); render(); } }
+  function hardReset(){ if(!admin) return; if(confirm('Slette ALT og starte på nytt?')){ var fresh = clone(DEFAULT); state = Object.assign(fresh, { pinSalt: randSalt() }); hashPin('1234', state.pinSalt).then(function(h){ state.pinHash=h; state.lastResetISO=new Date().toISOString(); save(); applyTheme(state.theme); render(); }); } }
+
+  render();
+  </script>
+
+  <!-- Socket.IO klient + synk-lag må komme etter at alt over er definert -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    var socket = null;
+    var clientId = localStorage.getItem('clientId') || Math.random().toString(36).slice(2);
+    localStorage.setItem('clientId', clientId);
+
+    var FAMILY_ID = localStorage.getItem('FAMILY_ID') || '';
+    if (!FAMILY_ID) { FAMILY_ID = prompt('Familie-ID (f.eks. etternavn-året):') || 'familie'; localStorage.setItem('FAMILY_ID', FAMILY_ID); }
+
+    var SYNC_KEY = localStorage.getItem('SYNC_KEY') || '';
+    if (!SYNC_KEY) { SYNC_KEY = prompt('Tilgangskode (samme på alle enheter):') || ''; localStorage.setItem('SYNC_KEY', SYNC_KEY); }
+
+    var squelch = false;
+
+    function connectSocket() {
+      try {
+        socket = io({ transports: ['websocket'], query: { family: FAMILY_ID } });
+        socket.on('connect', function () {
+          socket.emit('hello', { key: SYNC_KEY, family: FAMILY_ID, clientId: clientId });
+          socket.emit('getSnapshot', { family: FAMILY_ID });
+        });
+        socket.on('snapshot', function (snap) {
+          if (snap && snap.family === FAMILY_ID && snap.state) {
+            state = snap.state; save(); applyTheme(state.theme); ensureDailyReset(); render();
+          }
+        });
+        socket.on('event', function (evt) {
+          if (!evt || evt.family !== FAMILY_ID || evt.src === clientId) return;
+          applyRemoteEvent(evt);
+        });
+      } catch (e) { console.warn('socket error', e); }
+    }
+
+    function emitEvt(type, payload) {
+      if (!socket || socket.disconnected) return;
+      var evt = { family: FAMILY_ID, type: type, payload: payload, ts: Date.now(), src: clientId };
+      socket.emit('event', evt);
+    }
+
+    function saveSnapshot() {
+      if (!socket || socket.disconnected) return;
+      socket.emit('saveSnapshot', { family: FAMILY_ID, state: state });
+    }
+
+    var _startTimer = startTimer,
+        _pauseTimer = pauseTimer,
+        _addMinutes = addMinutes,
+        _resetOne = resetOne,
+        _saveSettings = saveSettings,
+        _resetToday = resetToday,
+        _hardReset = hardReset,
+        _addQuest = addQuest,
+        _delQuest = delQuest,
+        _grantQuest = grantQuest;
+
+    startTimer = function (id) { _startTimer(id); if (!squelch) emitEvt('start', { id: id }); };
+    pauseTimer = function (id) {
+      _pauseTimer(id);
+      if (!squelch) {
+        var c = state.children.find(function (x) { return x.id === id; });
+        var remaining = c ? c.remaining : undefined;
+        emitEvt('pause', { id: id, remaining: remaining });
+      }
+    };
+    addMinutes = function (id, mins) { _addMinutes(id, mins); if (!squelch) emitEvt('addMinutes', { id: id, mins: mins }); };
+    resetOne = function (id) { _resetOne(id); if (!squelch) emitEvt('resetOne', { id: id }); };
+    saveSettings = async function () {
+      var before = JSON.stringify({ dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
+      await _saveSettings();
+      var after = JSON.stringify({ dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
+      if (!squelch && before !== after) emitEvt('settings', { dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
+      saveSnapshot();
+    };
+    resetToday = function () { _resetToday(); if (!squelch) emitEvt('resetToday', {}); };
+    hardReset = function () { _hardReset(); if (!squelch) emitEvt('hardReset', {}); };
+    addQuest = function () { _addQuest(); if (!squelch) emitEvt('questsChanged', { quests: state.quests }); saveSnapshot(); };
+    delQuest = function (id) { _delQuest(id); if (!squelch) emitEvt('questsChanged', { quests: state.quests }); saveSnapshot(); };
+    grantQuest = function (qid) { _grantQuest(qid); if (!squelch) emitEvt('granted', { qid: qid }); };
+
+    document.body.addEventListener('input', function (e) {
+      var t = e.target;
+      if (t.dataset.act === 'rename') {
+        var c = state.children.find(function (x) { return x.id === t.dataset.id; });
+        if (!c) return;
+        var old = c.name;
+        c.name = t.value; save();
+        if (!squelch && t.value !== old) emitEvt('rename', { id: c.id, name: c.name });
+      }
+    });
+
+    function applyRemoteEvent(evt) {
+      squelch = true;
+      try {
+        if (evt.type === 'start') _startTimer(evt.payload.id);
+        if (evt.type === 'pause') {
+          _pauseTimer(evt.payload.id);
+          var c = state.children.find(function (x) { return x.id === evt.payload.id; });
+          if (c && typeof evt.payload.remaining === 'number') c.remaining = evt.payload.remaining;
+        }
+        if (evt.type === 'addMinutes') _addMinutes(evt.payload.id, evt.payload.mins);
+        if (evt.type === 'resetOne') _resetOne(evt.payload.id);
+        if (evt.type === 'settings') { state.dailyMins = evt.payload.dailyMins; state.resetHour = evt.payload.resetHour; state.theme = evt.payload.theme; applyTheme(state.theme); save(); render(); }
+        if (evt.type === 'resetToday') _resetToday();
+        if (evt.type === 'hardReset') _hardReset();
+        if (evt.type === 'questsChanged') { state.quests = evt.payload.quests || state.quests; save(); render(); }
+        if (evt.type === 'rename') { var cc = state.children.find(function (x) { return x.id === evt.payload.id; }); if (cc) { cc.name = evt.payload.name; save(); render(); } }
+      } finally { squelch = false; }
+    }
+
+    connectSocket();
+  </script>
+</body>
+</html>
