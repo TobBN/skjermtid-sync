@@ -5,17 +5,17 @@ const { Server } = require('socket.io');
 const app = express();
 app.use(express.static('public')); // serverer public/skjermtid.html
 
-// Rot -> redirect til HTML + enkel healthcheck
+// Rot -> redirect + healthcheck
 app.get('/', (req, res) => res.redirect('/skjermtid.html'));
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// Server-side "portvakt" via SYNC_KEY (sett i Render -> Environment)
+// Portvakt via SYNC_KEY (sett i Render -> Environment)
 const SYNC_KEY = process.env.SYNC_KEY || '';
 
-// In-memory snapshots (null ved omstart på free-plan — helt ok)
+// Enkle snapshots i minne (nullstilles ved omstart på free-plan)
 const snapshots = new Map(); // familyId -> { family, state }
 
 io.on('connection', (socket) => {
@@ -50,11 +50,11 @@ io.on('connection', (socket) => {
   socket.on('event', (evt) => {
     if (!authed) return;
     if (!evt || !evt.family) return;
-    // Legg på serversidens tidsstempel for "last write wins"
+    // server-tidsstempel -> last write wins på klient
     evt.serverTs = Date.now();
     io.to(`family:${String(evt.family)}`).emit('event', evt);
   });
 });
 
-const PORT = process.env.PORT || 3000; // Ikke hardkod 10000 – Render setter PORT
+const PORT = process.env.PORT || 3000; // Render setter PORT
 server.listen(PORT, () => console.log('listening on ' + PORT));
