@@ -7,7 +7,6 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Skjermtid">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%23222'/><text x='50%' y='52%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='96' fill='white'>⏳</text></svg>">
   <style>
     :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--warn:#f59e0b;--danger:#ef4444;--blue:#3b82f6;--border:#1f2937}
     .light{--bg:#f8fafc;--card:#ffffff;--muted:#475569;--text:#0f172a;--accent:#16a34a;--warn:#d97706;--danger:#dc2626;--blue:#2563eb;--border:#e2e8f0}
@@ -52,11 +51,12 @@
     <header class="row">
       <div class="grow">
         <h1>⏳ Skjermtid</h1>
-        <div class="muted small">Data lagres lokalt; synk via hendelser/snapshots.</div>
+        <div class="muted small">Lokal lagring; live-synk via Socket.IO</div>
       </div>
       <div class="row lock">
+        <span id="wsStatus" class="badge">Kobler…</span>
         <button id="themeToggle" class="pill" title="Bytt tema">🌓 Tema</button>
-        <span id="adminStatus" class="badge">Låst (foreldre kreves)</span>
+        <span id="adminStatus" class="badge">Låst</span>
         <button id="toggleAdmin" class="blue">Lås opp</button>
       </div>
     </header>
@@ -65,7 +65,7 @@
 
     <section class="grid" style="margin-top:12px">
       <div class="card adminOnly">
-        <div class="row head"><h2 class="grow">🎯 Oppdrag (tjen skjermtid)</h2>
+        <div class="row head"><h2 class="grow">🎯 Oppdrag</h2>
           <button class="primary" id="addQuestBtn">Nytt oppdrag</button></div>
         <div id="quests" class="list"></div>
       </div>
@@ -93,7 +93,7 @@
           <div class="row">
             <button id="exportBtn" class="pill">Eksporter data</button>
             <label class="pill">Importer <input id="importFile" type="file" accept="application/json"></label>
-            <span class="note">Tips: Ta en eksport som sikkerhetskopi ca. ukentlig.</span>
+            <span class="note">Tips: Ta en eksport iblant.</span>
           </div>
         </div>
       </div>
@@ -132,19 +132,11 @@
   };
 
   var FUN = [
-    {text:'Hinderløype', emoji:'🧗'},
-    {text:'Skattejakt', emoji:'🗺️'},
-    {text:'Kaste ball', emoji:'🏈'},
-    {text:'Danselek', emoji:'💃'},
-    {text:'Stoppleken', emoji:'🛑'},
-    {text:'Tegne', emoji:'🖍️'},
-    {text:'Lego', emoji:'🧱'},
-    {text:'Puslespill', emoji:'🧩'},
-    {text:'Sanglek', emoji:'🎤'},
-    {text:'Papirfly', emoji:'🛩️'}
+    {text:'Hinderløype', emoji:'🧗'}, {text:'Skattejakt', emoji:'🗺️'}, {text:'Kaste ball', emoji:'🏈'},
+    {text:'Danselek', emoji:'💃'}, {text:'Stoppleken', emoji:'🛑'}, {text:'Tegne', emoji:'🖍️'},
+    {text:'Lego', emoji:'🧱'}, {text:'Puslespill', emoji:'🧩'}, {text:'Sanglek', emoji:'🎤'}, {text:'Papirfly', emoji:'🛩️'}
   ];
 
-  // --- Robust normalisering av state ---
   function normalizeState(s){
     var out = clone(DEFAULT);
     if (s && typeof s === 'object'){
@@ -155,7 +147,6 @@
       out.pinSalt = s.pinSalt || out.pinSalt;
       out.lastResetISO = s.lastResetISO || out.lastResetISO;
       out.lastBackupISO = s.lastBackupISO || out.lastBackupISO;
-      // Barn
       var incoming = Array.isArray(s.children) ? s.children : [];
       var byId = {}; incoming.forEach(function(c){ if(c && c.id) byId[c.id]=c; });
       out.children = out.children.map(function(def){
@@ -170,7 +161,6 @@
           lastTick: (typeof c.lastTick==='number' ? c.lastTick : 0)
         };
       });
-      // Quests
       if (Array.isArray(s.quests)){
         out.quests = s.quests.map(function(q){
           return { id:q.id||Math.random().toString(36).slice(2,9), title:q.title||'Oppdrag', minutes:+q.minutes||5, active: !!q.active };
@@ -183,7 +173,7 @@
   var state = load();
   applyTheme(state.theme);
   ensureDailyReset();
-  var admin = false; // start låst
+  var admin = false; // låst ved start
   updateAdminClass();
 
   function load(){
@@ -295,7 +285,7 @@
       }
     }
 
-    $('#adminStatus').textContent = admin ? 'Åpen (foreldre)' : 'Låst (foreldre kreves)';
+    $('#adminStatus').textContent = admin ? 'Åpen' : 'Låst';
     $('#toggleAdmin').textContent = admin ? 'Lås' : 'Lås opp';
   }
 
@@ -310,7 +300,6 @@
     else alert('Feil PIN');
   });
 
-  // Tema-knapp: bytt lokalt + broadcast
   $('#themeToggle').addEventListener('click', function(){
     state.theme = (state.theme==='dark'?'light':'dark');
     applyTheme(state.theme); save();
@@ -421,12 +410,23 @@
 
   async function saveSettings(){
     if(!admin) return;
+    var changedPin = false;
     var dm = +($('#dailyMins').value)||0; state.dailyMins=dm;
     var rh=$('#resetHour').value||'05:00'; state.resetHour=rh;
-    var pin=$('#pinInput').value.trim(); if(pin){ state.pinSalt = randSalt(); state.pinHash = await hashPin(pin, state.pinSalt); $('#pinInput').value=''; }
+    var pin=$('#pinInput').value.trim();
+    if(pin){
+      state.pinSalt = randSalt();
+      state.pinHash = await hashPin(pin, state.pinSalt);
+      $('#pinInput').value='';
+      changedPin = true;
+    }
     state.children.forEach(function(c){ if(c.remaining>dm*60*1000) c.remaining=dm*60*1000; });
     save(); render();
-    if(!squelch) emitEvt('settings', { dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
+    if(!squelch) {
+      emitEvt('settings', { dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
+      if (changedPin) emitEvt('pin', { pinSalt: state.pinSalt, pinHash: state.pinHash }); // synk PIN
+      saveSnapshot();
+    }
   }
   function resetToday(){ if(!admin) return; if(confirm('Nullstille alle til daglig kvote?')){ state.children.forEach(function(c){ c.remaining=state.dailyMins*60*1000; c.running=false; c.lastTick=0; }); state.lastResetISO = new Date().toISOString(); save(); render(); if(!squelch) emitEvt('resetToday', {}); } }
   function hardReset(){ if(!admin) return; if(confirm('Slette ALT og starte på nytt?')){ var fresh = clone(DEFAULT); state = Object.assign(fresh, { pinSalt: randSalt() }); hashPin('1234', state.pinSalt).then(function(h){ state.pinHash=h; state.lastResetISO=new Date().toISOString(); save(); applyTheme(state.theme); render(); if(!squelch) emitEvt('hardReset', {}); }); } }
@@ -447,41 +447,44 @@
 
     var squelch = false;
 
-    // Last-write-wins klokke per barn for absolutte oppdateringer
-    var absClock = {}; // { childId: number }
+    var absClock = {}; // childId -> last serverTs
     function freshAbs(childId, ts) {
       if (!ts) return true;
       if (!absClock[childId] || ts >= absClock[childId]) { absClock[childId] = ts; return true; }
       return false;
     }
 
-    // Hvem “eier” en kjørende timer (sender hjerteslag)
-    var runLeader = {}; // { childId: clientId }
+    var runLeader = {}; // childId -> clientId
 
     function connectSocket() {
       try {
         socket = io({ transports: ['websocket'], query: { family: FAMILY_ID } });
         socket.on('connect', function () {
+          $('#wsStatus').textContent = 'Kobler…';
           socket.emit('hello', { key: SYNC_KEY, family: FAMILY_ID, clientId: clientId });
           socket.emit('getSnapshot', { family: FAMILY_ID });
         });
+        socket.on('authed', function(){ $('#wsStatus').textContent = 'Tilkoblet'; });
         socket.on('snapshot', function (snap) {
-          if (snap && snap.family === FAMILY_ID && snap.state) {
-            state = normalizeState(snap.state); save();
-            applyTheme(state.theme); ensureDailyReset(); render();
+          if (!snap || !snap.state || !Array.isArray(snap.state.children) || snap.state.children.length===0) {
+            // seed server med lokal state
+            saveSnapshot();
+            return;
           }
+          state = normalizeState(snap.state); save();
+          applyTheme(state.theme); ensureDailyReset(); render();
         });
         socket.on('event', function (evt) {
           if (!evt || evt.family !== FAMILY_ID || evt.src === clientId) return;
           applyRemoteEvent(evt);
         });
-      } catch (e) { console.warn('socket error', e); }
+        socket.on('disconnect', function(){ $('#wsStatus').textContent = 'Frakoblet'; });
+      } catch (e) { console.warn('socket error', e); $('#wsStatus').textContent = 'Feil'; }
     }
 
     function emitEvt(type, payload) {
       if (!socket || socket.disconnected) return;
-      var evt = { family: FAMILY_ID, type: type, payload: payload, ts: Date.now(), src: clientId };
-      socket.emit('event', evt);
+      socket.emit('event', { family: FAMILY_ID, type: type, payload: payload, ts: Date.now(), src: clientId });
     }
 
     function saveSnapshot() {
@@ -489,7 +492,6 @@
       socket.emit('saveSnapshot', { family: FAMILY_ID, state: state });
     }
 
-    // Override lokale funksjoner så de også broadcaster
     var _startTimer = startTimer,
         _pauseTimer = pauseTimer,
         _addMinutes = addMinutes,
@@ -506,7 +508,7 @@
       if (!squelch) {
         var c = state.children.find(function (x) { return x.id === id; });
         var payload = { id: id, startedAt: Date.now(), remaining: c ? c.remaining : undefined };
-        runLeader[id] = clientId; // jeg er leder for denne kjøringen
+        runLeader[id] = clientId;
         emitEvt('start', payload);
       }
     };
@@ -515,8 +517,7 @@
       _pauseTimer(id);
       if (!squelch) {
         var c = state.children.find(function (x) { return x.id === id; });
-        var remaining = c ? c.remaining : undefined;
-        emitEvt('pause', { id: id, remaining: remaining });
+        emitEvt('pause', { id: id, remaining: c ? c.remaining : undefined });
         delete runLeader[id];
       }
     };
@@ -556,10 +557,8 @@
         if (evt.type === 'start') {
           if (!freshAbs(p.id, t)) return;
           c = state.children.find(function (x) { return x.id === p.id; }); if (!c) return;
-          c.running = true;
-          c.lastTick = p.startedAt || Date.now();
+          c.running = true; c.lastTick = p.startedAt || Date.now();
           if (typeof p.remaining === 'number') c.remaining = p.remaining;
-          // den som startet ble leder
           runLeader[p.id] = evt.src;
           save(); render(); return;
         }
@@ -580,34 +579,30 @@
           save(); render(); return;
         }
 
-        if (evt.type === 'resetOne') {
-          if (!freshAbs(p.id, t)) return;
-          _resetOne(p.id); return;
-        }
-
-        if (evt.type === 'addMinutes') {
-          _addMinutes(p.id, p.mins); return; // additiv
-        }
-
+        if (evt.type === 'resetOne') { if (!freshAbs(p.id, t)) return; _resetOne(p.id); return; }
+        if (evt.type === 'addMinutes') { _addMinutes(p.id, p.mins); return; }
         if (evt.type === 'theme') { applyTheme(p.theme); save(); render(); return; }
 
         if (evt.type === 'settings') {
-          state.dailyMins = p.dailyMins;
-          state.resetHour = p.resetHour;
-          state.theme = p.theme;
+          state.dailyMins = p.dailyMins; state.resetHour = p.resetHour; state.theme = p.theme;
           applyTheme(state.theme); save(); render(); return;
+        }
+
+        if (evt.type === 'pin') {
+          // synk PIN-hash + salt (felles PIN på tvers av enheter)
+          if (p.pinSalt && p.pinHash) { state.pinSalt = p.pinSalt; state.pinHash = p.pinHash; save(); }
+          return;
         }
 
         if (evt.type === 'resetToday') { _resetToday(); return; }
         if (evt.type === 'hardReset') { _hardReset(); return; }
 
         if (evt.type === 'questsChanged') { state.quests = p.quests || state.quests; save(); render(); return; }
-
         if (evt.type === 'rename') { c = state.children.find(function (x) { return x.id === p.id; }); if (c) { c.name = p.name; save(); render(); } return; }
       } finally { squelch = false; }
     }
 
-    // Hjerteslag: lederen for hver kjørende timer sender remaining hvert 5. sekund
+    // Hjerte: leder for kjørende timer sender remaining hvert 5s
     setInterval(function(){
       for (var i=0;i<state.children.length;i++){
         var c = state.children[i];
@@ -616,6 +611,9 @@
         }
       }
     }, 5000);
+
+    // Seed server på førstegangsbesøk hvis tom
+    window.addEventListener('load', function(){ setTimeout(saveSnapshot, 1000); });
 
     connectSocket();
   </script>
