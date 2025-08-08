@@ -33,7 +33,7 @@
     .list{display:flex;flex-direction:column;gap:8px}
     details{background:transparent;border:1px dashed #334155;padding:8px 10px;border-radius:12px}
     summary{cursor:pointer}
-    .lock{position:sticky;right:12px;top:8px}
+    .lock{display:flex;gap:8px;align-items:center}
     .ok{color:var(--accent)} .amber{color:var(--warn)} .red{color:var(--danger)}
     .pill{border-radius:999px;padding:6px 10px;background:transparent;border:1px solid var(--border)}
     .small{font-size:12px}
@@ -53,8 +53,10 @@
         <h1>⏳ Skjermtid</h1>
         <div class="muted small">Lokal lagring; live-synk via Socket.IO</div>
       </div>
-      <div class="row lock">
+      <div class="lock">
         <span id="wsStatus" class="badge">Kobler…</span>
+        <span id="famLabel" class="badge"></span>
+        <button id="rebBtn" class="pill" title="Bytt familie/kode">Bytt familie/kode</button>
         <button id="themeToggle" class="pill" title="Bytt tema">🌓 Tema</button>
         <span id="adminStatus" class="badge">Låst</span>
         <button id="toggleAdmin" class="blue">Lås opp</button>
@@ -314,6 +316,12 @@
   }
   function applyTheme(mode){ document.body.classList.toggle('light', mode==='light'); }
 
+  document.getElementById('rebBtn').addEventListener('click', function(){
+    localStorage.removeItem('FAMILY_ID');
+    localStorage.removeItem('SYNC_KEY');
+    location.reload();
+  });
+
   document.body.addEventListener('click', function(e){
     var t=e.target;
     if(t.matches && t.matches('[data-act]')){
@@ -361,6 +369,7 @@
       if('pin' in data){ migratePlainPin(data); }
       if(!data.pinHash || !data.pinSalt){ initDefaultPin(data); }
       state = data; save(); ensureDailyReset(); applyTheme(state.theme); render(); alert('Importert.');
+      if(!squelch) saveSnapshot();
     }catch(err){ alert('Kunne ikke importere: '+err.message); }
   });
 
@@ -424,7 +433,7 @@
     save(); render();
     if(!squelch) {
       emitEvt('settings', { dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
-      if (changedPin) emitEvt('pin', { pinSalt: state.pinSalt, pinHash: state.pinHash }); // synk PIN
+      if (changedPin) emitEvt('pin', { pinSalt: state.pinSalt, pinHash: state.pinHash });
       saveSnapshot();
     }
   }
@@ -441,19 +450,17 @@
 
     var FAMILY_ID = localStorage.getItem('FAMILY_ID') || '';
     if (!FAMILY_ID) { FAMILY_ID = prompt('Familie-ID (f.eks. etternavn-året):') || 'familie'; localStorage.setItem('FAMILY_ID', FAMILY_ID); }
-
     var SYNC_KEY = localStorage.getItem('SYNC_KEY') || '';
     if (!SYNC_KEY) { SYNC_KEY = prompt('Tilgangskode (samme på alle enheter):') || ''; localStorage.setItem('SYNC_KEY', SYNC_KEY); }
+    document.getElementById('famLabel').textContent = 'Familie: ' + FAMILY_ID;
 
     var squelch = false;
-
     var absClock = {}; // childId -> last serverTs
     function freshAbs(childId, ts) {
       if (!ts) return true;
       if (!absClock[childId] || ts >= absClock[childId]) { absClock[childId] = ts; return true; }
       return false;
     }
-
     var runLeader = {}; // childId -> clientId
 
     function connectSocket() {
@@ -467,7 +474,7 @@
         socket.on('authed', function(){ $('#wsStatus').textContent = 'Tilkoblet'; });
         socket.on('snapshot', function (snap) {
           if (!snap || !snap.state || !Array.isArray(snap.state.children) || snap.state.children.length===0) {
-            // seed server med lokal state
+            // Hvis server er "tom" rett etter oppstart → push vår state og la server broadcast'e tilbake
             saveSnapshot();
             return;
           }
@@ -507,9 +514,8 @@
       _startTimer(id);
       if (!squelch) {
         var c = state.children.find(function (x) { return x.id === id; });
-        var payload = { id: id, startedAt: Date.now(), remaining: c ? c.remaining : undefined };
         runLeader[id] = clientId;
-        emitEvt('start', payload);
+        emitEvt('start', { id: id, startedAt: Date.now(), remaining: c ? c.remaining : undefined });
       }
     };
 
@@ -588,11 +594,7 @@
           applyTheme(state.theme); save(); render(); return;
         }
 
-        if (evt.type === 'pin') {
-          // synk PIN-hash + salt (felles PIN på tvers av enheter)
-          if (p.pinSalt && p.pinHash) { state.pinSalt = p.pinSalt; state.pinHash = p.pinHash; save(); }
-          return;
-        }
+        if (evt.type === 'pin') { if (p.pinSalt && p.pinHash) { state.pinSalt = p.pinSalt; state.pinHash = p.pinHash; save(); } return; }
 
         if (evt.type === 'resetToday') { _resetToday(); return; }
         if (evt.type === 'hardReset') { _hardReset(); return; }
@@ -611,9 +613,6 @@
         }
       }
     }, 5000);
-
-    // Seed server på førstegangsbesøk hvis tom
-    window.addEventListener('load', function(){ setTimeout(saveSnapshot, 1000); });
 
     connectSocket();
   </script>
