@@ -41,11 +41,11 @@ io.on('connection', (socket) => {
     snapshots.set(String(snap.family), { family: String(snap.family), state: snap.state });
   });
 
-  socket.on('event', (evt) => {
-    if (!authed) return;
-    if (!evt || !evt.family) return;
-    io.to(`family:${String(evt.family)}`).emit('event', evt);
-  });
+ socket.on('event', (evt) => {
+  if (!authed) return;
+  if (!evt || !evt.family) return;
+  evt.serverTs = Date.now();
+  io.to(`family:${String(evt.family)}`).emit('event', evt);
 });
 
 const PORT = process.env.PORT || 3000; // DO NOT hardcode 10000
