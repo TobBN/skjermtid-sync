@@ -8,7 +8,6 @@
   <meta name="apple-mobile-web-app-title" content="Skjermtid">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%23222'/><text x='50%' y='52%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='96' fill='white'>⏳</text></svg>">
-
   <style>
     :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--warn:#f59e0b;--danger:#ef4444;--blue:#3b82f6;--border:#1f2937}
     .light{--bg:#f8fafc;--card:#ffffff;--muted:#475569;--text:#0f172a;--accent:#16a34a;--warn:#d97706;--danger:#dc2626;--blue:#2563eb;--border:#e2e8f0}
@@ -53,7 +52,7 @@
     <header class="row">
       <div class="grow">
         <h1>⏳ Skjermtid</h1>
-        <div class="muted small">Lokal data på enheten. Synk via server kun for hendelser/snapshots.</div>
+        <div class="muted small">Data lagres lokalt; synk skjer via hendelser/snapshots.</div>
       </div>
       <div class="row lock">
         <button id="themeToggle" class="pill" title="Bytt tema">🌓 Tema</button>
@@ -114,13 +113,14 @@
     <source src="data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" type="audio/mpeg">
   </audio>
 
+  <!-- App-logikk (iOS12-vennlig JS) -->
   <script>
-  const $ = function(sel){ return document.querySelector(sel); };
-  const qsa = function(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); };
-  const fmt = function(ms){ var s=Math.max(0,Math.floor(ms/1000)); var h=Math.floor(s/3600); var m=Math.floor((s%3600)/60); var ss=s%60; return (h>0? String(h).padStart(2,'0')+':':'')+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); };
-  const clone = function(o){ return JSON.parse(JSON.stringify(o)); };
+  var $ = function(sel){ return document.querySelector(sel); };
+  var qsa = function(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+  var fmt = function(ms){ var s=Math.max(0,Math.floor(ms/1000)); var h=Math.floor(s/3600); var m=Math.floor((s%3600)/60); var ss=s%60; return (h>0? String(h).padStart(2,'0')+':':'')+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); };
+  var clone = function(o){ return JSON.parse(JSON.stringify(o)); };
 
-  const DEFAULT = {
+  var DEFAULT = {
     pinHash:'', pinSalt:'', resetHour:'05:00', dailyMins:120, theme:'dark',
     children:[
       {id:'c1',name:'Leah',gender:'girl',color:'#f472b6',remaining:120*60*1000,running:false,lastTick:0},
@@ -131,7 +131,7 @@
     lastResetISO:'', lastBackupISO:''
   };
 
-  const FUN = [
+  var FUN = [
     {text:'Hinderløype', emoji:'🧗'},
     {text:'Skattejakt', emoji:'🗺️'},
     {text:'Kaste ball', emoji:'🏈'},
@@ -271,8 +271,19 @@
     else alert('Feil PIN');
   });
 
-  $('#themeToggle').addEventListener('click', function(){ state.theme = (state.theme==='dark'?'light':'dark'); applyTheme(state.theme); save(); });
-  var themeSel = $('#themeSelect'); if(themeSel){ themeSel.addEventListener('change', function(e){ state.theme=e.target.value; applyTheme(state.theme); save(); }); }
+  // Tema-knapp: bytt lokalt + broadcast umiddelbart
+  $('#themeToggle').addEventListener('click', function(){
+    state.theme = (state.theme==='dark'?'light':'dark');
+    applyTheme(state.theme); save();
+    if(!squelch) emitEvt('theme', { theme: state.theme });
+  });
+
+  var themeSel = $('#themeSelect'); if(themeSel){
+    themeSel.addEventListener('change', function(e){
+      state.theme=e.target.value; applyTheme(state.theme); save();
+      if(!squelch) emitEvt('theme', { theme: state.theme });
+    });
+  }
   function applyTheme(mode){ document.body.classList.toggle('light', mode==='light'); }
 
   document.body.addEventListener('click', function(e){
@@ -302,9 +313,12 @@
     if(t.dataset.act==='rename'){
       var c = state.children.find(function(x){ return x.id===t.dataset.id; }); if(!c) return;
       var old=c.name; c.name=t.value; save();
+      if(!squelch && t.value!==old) emitEvt('rename', { id: c.id, name: c.name });
     }
     if(t.dataset.act==='setmins'){
-      var c2 = state.children.find(function(x){ return x.id===t.dataset.id; }); if(!c2) return; var v=+t.value||0; c2.remaining=v*60*1000; save(); render();
+      var c2 = state.children.find(function(x){ return x.id===t.dataset.id; }); if(!c2) return;
+      var v=+t.value||0; c2.remaining=v*60*1000; save(); render();
+      if(!squelch) emitEvt('setRemaining', { id: c2.id, remaining: c2.remaining });
     }
     if(t.dataset.act==='qtitle'){
       var q = state.quests.find(function(x){ return x.id===t.dataset.qid; }); if(!q) return; q.title=t.value; save();
@@ -375,14 +389,13 @@
     var pin=$('#pinInput').value.trim(); if(pin){ state.pinSalt = randSalt(); state.pinHash = await hashPin(pin, state.pinSalt); $('#pinInput').value=''; }
     state.children.forEach(function(c){ if(c.remaining>dm*60*1000) c.remaining=dm*60*1000; });
     save(); render();
+    if(!squelch) emitEvt('settings', { dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
   }
-  function resetToday(){ if(!admin) return; if(confirm('Nullstille alle til daglig kvote?')){ state.children.forEach(function(c){ c.remaining=state.dailyMins*60*1000; c.running=false; c.lastTick=0; }); state.lastResetISO = new Date().toISOString(); save(); render(); } }
-  function hardReset(){ if(!admin) return; if(confirm('Slette ALT og starte på nytt?')){ var fresh = clone(DEFAULT); state = Object.assign(fresh, { pinSalt: randSalt() }); hashPin('1234', state.pinSalt).then(function(h){ state.pinHash=h; state.lastResetISO=new Date().toISOString(); save(); applyTheme(state.theme); render(); }); } }
-
-  render();
+  function resetToday(){ if(!admin) return; if(confirm('Nullstille alle til daglig kvote?')){ state.children.forEach(function(c){ c.remaining=state.dailyMins*60*1000; c.running=false; c.lastTick=0; }); state.lastResetISO = new Date().toISOString(); save(); render(); if(!squelch) emitEvt('resetToday', {}); } }
+  function hardReset(){ if(!admin) return; if(confirm('Slette ALT og starte på nytt?')){ var fresh = clone(DEFAULT); state = Object.assign(fresh, { pinSalt: randSalt() }); hashPin('1234', state.pinSalt).then(function(h){ state.pinHash=h; state.lastResetISO=new Date().toISOString(); save(); applyTheme(state.theme); render(); if(!squelch) emitEvt('hardReset', {}); }); } }
   </script>
 
-  <!-- Socket.IO klient + synk-lag må komme etter at alt over er definert -->
+  <!-- Socket.IO klient + synk-lag (må komme etter alt over) -->
   <script src="/socket.io/socket.io.js"></script>
   <script>
     var socket = null;
@@ -396,6 +409,14 @@
     if (!SYNC_KEY) { SYNC_KEY = prompt('Tilgangskode (samme på alle enheter):') || ''; localStorage.setItem('SYNC_KEY', SYNC_KEY); }
 
     var squelch = false;
+
+    // Ny: per-barn "clock" for absolutte oppdateringer (last-write-wins)
+    var absClock = {}; // { childId: number }
+    function freshAbs(childId, ts) {
+      if (!ts) return true;
+      if (!absClock[childId] || ts >= absClock[childId]) { absClock[childId] = ts; return true; }
+      return false;
+    }
 
     function connectSocket() {
       try {
@@ -427,6 +448,7 @@
       socket.emit('saveSnapshot', { family: FAMILY_ID, state: state });
     }
 
+    // Override lokale funksjoner så de også broadcaster
     var _startTimer = startTimer,
         _pauseTimer = pauseTimer,
         _addMinutes = addMinutes,
@@ -438,7 +460,15 @@
         _delQuest = delQuest,
         _grantQuest = grantQuest;
 
-    startTimer = function (id) { _startTimer(id); if (!squelch) emitEvt('start', { id: id }); };
+    startTimer = function (id) {
+      _startTimer(id);
+      if (!squelch) {
+        var c = state.children.find(function (x) { return x.id === id; });
+        var payload = { id: id, startedAt: Date.now(), remaining: c ? c.remaining : undefined };
+        emitEvt('start', payload);
+      }
+    };
+
     pauseTimer = function (id) {
       _pauseTimer(id);
       if (!squelch) {
@@ -447,19 +477,14 @@
         emitEvt('pause', { id: id, remaining: remaining });
       }
     };
+
     addMinutes = function (id, mins) { _addMinutes(id, mins); if (!squelch) emitEvt('addMinutes', { id: id, mins: mins }); };
-    resetOne = function (id) { _resetOne(id); if (!squelch) emitEvt('resetOne', { id: id }); };
-    saveSettings = async function () {
-      var before = JSON.stringify({ dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
-      await _saveSettings();
-      var after = JSON.stringify({ dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
-      if (!squelch && before !== after) emitEvt('settings', { dailyMins: state.dailyMins, resetHour: state.resetHour, theme: state.theme });
-      saveSnapshot();
-    };
-    resetToday = function () { _resetToday(); if (!squelch) emitEvt('resetToday', {}); };
-    hardReset = function () { _hardReset(); if (!squelch) emitEvt('hardReset', {}); };
-    addQuest = function () { _addQuest(); if (!squelch) emitEvt('questsChanged', { quests: state.quests }); saveSnapshot(); };
-    delQuest = function (id) { _delQuest(id); if (!squelch) emitEvt('questsChanged', { quests: state.quests }); saveSnapshot(); };
+    resetOne   = function (id)       { _resetOne(id);         if (!squelch) emitEvt('resetOne',   { id: id }); };
+
+    // saveSettings/ resetToday / hardReset sender allerede events i app-logikken over
+
+    addQuest = function () { _addQuest(); if (!squelch) { emitEvt('questsChanged', { quests: state.quests }); saveSnapshot(); } };
+    delQuest = function (id) { _delQuest(id); if (!squelch) { emitEvt('questsChanged', { quests: state.quests }); saveSnapshot(); } };
     grantQuest = function (qid) { _grantQuest(qid); if (!squelch) emitEvt('granted', { qid: qid }); };
 
     document.body.addEventListener('input', function (e) {
@@ -471,24 +496,70 @@
         c.name = t.value; save();
         if (!squelch && t.value !== old) emitEvt('rename', { id: c.id, name: c.name });
       }
+      if (t.dataset.act === 'setmins') {
+        var c2 = state.children.find(function (x) { return x.id === t.dataset.id; });
+        if (!c2) return;
+        var v = +t.value || 0;
+        c2.remaining = v * 60 * 1000; save(); render();
+        if (!squelch) emitEvt('setRemaining', { id: c2.id, remaining: c2.remaining });
+      }
     });
 
     function applyRemoteEvent(evt) {
       squelch = true;
       try {
-        if (evt.type === 'start') _startTimer(evt.payload.id);
-        if (evt.type === 'pause') {
-          _pauseTimer(evt.payload.id);
-          var c = state.children.find(function (x) { return x.id === evt.payload.id; });
-          if (c && typeof evt.payload.remaining === 'number') c.remaining = evt.payload.remaining;
+        var t = evt.serverTs || evt.ts || 0;
+        var p = evt.payload || {};
+        var c;
+
+        if (evt.type === 'start') {
+          if (!freshAbs(p.id, t)) return;
+          c = state.children.find(function (x) { return x.id === p.id; }); if (!c) return;
+          c.running = true;
+          c.lastTick = p.startedAt || Date.now();
+          if (typeof p.remaining === 'number') c.remaining = p.remaining;
+          save(); render(); return;
         }
-        if (evt.type === 'addMinutes') _addMinutes(evt.payload.id, evt.payload.mins);
-        if (evt.type === 'resetOne') _resetOne(evt.payload.id);
-        if (evt.type === 'settings') { state.dailyMins = evt.payload.dailyMins; state.resetHour = evt.payload.resetHour; state.theme = evt.payload.theme; applyTheme(state.theme); save(); render(); }
-        if (evt.type === 'resetToday') _resetToday();
-        if (evt.type === 'hardReset') _hardReset();
-        if (evt.type === 'questsChanged') { state.quests = evt.payload.quests || state.quests; save(); render(); }
-        if (evt.type === 'rename') { var cc = state.children.find(function (x) { return x.id === evt.payload.id; }); if (cc) { cc.name = evt.payload.name; save(); render(); } }
+
+        if (evt.type === 'pause') {
+          if (!freshAbs(p.id, t)) return;
+          c = state.children.find(function (x) { return x.id === p.id; }); if (!c) return;
+          c.running = false;
+          if (typeof p.remaining === 'number') c.remaining = p.remaining;
+          save(); render(); return;
+        }
+
+        if (evt.type === 'setRemaining') {
+          if (!freshAbs(p.id, t)) return;
+          c = state.children.find(function (x) { return x.id === p.id; }); if (!c) return;
+          if (typeof p.remaining === 'number') c.remaining = p.remaining;
+          save(); render(); return;
+        }
+
+        if (evt.type === 'resetOne') {
+          if (!freshAbs(p.id, t)) return;
+          _resetOne(p.id); return;
+        }
+
+        if (evt.type === 'addMinutes') {
+          _addMinutes(p.id, p.mins); return; // additiv – tåler rekkefølge
+        }
+
+        if (evt.type === 'theme') { applyTheme(p.theme); save(); render(); return; }
+
+        if (evt.type === 'settings') {
+          state.dailyMins = p.dailyMins;
+          state.resetHour = p.resetHour;
+          state.theme = p.theme;
+          applyTheme(state.theme); save(); render(); return;
+        }
+
+        if (evt.type === 'resetToday') { _resetToday(); return; }
+        if (evt.type === 'hardReset') { _hardReset(); return; }
+
+        if (evt.type === 'questsChanged') { state.quests = p.quests || state.quests; save(); render(); return; }
+
+        if (evt.type === 'rename') { c = state.children.find(function (x) { return x.id === p.id; }); if (c) { c.name = p.name; save(); render(); } return; }
       } finally { squelch = false; }
     }
 
