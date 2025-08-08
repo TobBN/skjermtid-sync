@@ -29,7 +29,7 @@ io.on('connection', (socket) => {
     authed = true;
     family = String(fam || 'familie');
     socket.join(`family:${family}`);
-    socket.emit('authed', { ok: true });
+    socket.emit('authed', { ok: true, family });
   });
 
   socket.on('getSnapshot', (msg = {}) => {
@@ -41,10 +41,12 @@ io.on('connection', (socket) => {
   socket.on('saveSnapshot', (snap = {}) => {
     if (!authed) return;
     if (!snap.family) return;
-    const fam = String(snap.family);
-    // enkel sanity: krever alltid children-array
     if (!snap.state || !Array.isArray(snap.state.children) || snap.state.children.length === 0) return;
-    snapshots.set(fam, { family: fam, state: snap.state });
+    const fam = String(snap.family);
+    const payload = { family: fam, state: snap.state };
+    snapshots.set(fam, payload);
+    // Viktig: dytt snapshot ut til ALLE i familien, så alle havner på samme versjon
+    io.to(`family:${fam}`).emit('snapshot', payload);
   });
 
   socket.on('event', (evt = {}) => {
@@ -55,5 +57,5 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; // Render setter PORT
 server.listen(PORT, () => console.log('listening on ' + PORT));
