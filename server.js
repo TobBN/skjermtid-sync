@@ -3,23 +3,28 @@ const http = require('http');
 const { Server } = require('socket.io');
 
 const app = express();
-app.use(express.static('public')); // serves public/skjermtid.html
+app.use(express.static('public')); // serverer public/skjermtid.html
 
-// optional: root redirect + healthcheck
+// Rot -> redirect til HTML + enkel healthcheck
 app.get('/', (req, res) => res.redirect('/skjermtid.html'));
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// server-side gate via SYNC_KEY (set in Render -> Environment)
+// Server-side "portvakt" via SYNC_KEY (sett i Render -> Environment)
 const SYNC_KEY = process.env.SYNC_KEY || '';
+
+// In-memory snapshots (null ved omstart på free-plan — helt ok)
 const snapshots = new Map(); // familyId -> { family, state }
 
 io.on('connection', (socket) => {
-  let family = null, authed = false;
+  let family = null;
+  let authed = false;
 
-  socket.on('hello', ({ key, family: fam, clientId }) => {
+  socket.on('hello', (msg) => {
+    const key = msg && msg.key;
+    const fam = msg && msg.family;
     if (SYNC_KEY && key !== SYNC_KEY) {
       socket.emit('authError', 'Bad key');
       return socket.disconnect(true);
@@ -29,24 +34,27 @@ io.on('connection', (socket) => {
     socket.join(`family:${family}`);
   });
 
-  socket.on('getSnapshot', ({ family: fam }) => {
+  socket.on('getSnapshot', (msg) => {
     if (!authed) return;
-    const f = String(fam || family);
-    socket.emit('snapshot', snapshots.get(f) || null);
+    const fam = (msg && msg.family) ? String(msg.family) : family;
+    socket.emit('snapshot', snapshots.get(fam) || null);
   });
 
   socket.on('saveSnapshot', (snap) => {
     if (!authed) return;
     if (!snap || !snap.family) return;
-    snapshots.set(String(snap.family), { family: String(snap.family), state: snap.state });
+    const fam = String(snap.family);
+    snapshots.set(fam, { family: fam, state: snap.state });
   });
 
- socket.on('event', (evt) => {
-  if (!authed) return;
-  if (!evt || !evt.family) return;
-  evt.serverTs = Date.now();
-  io.to(`family:${String(evt.family)}`).emit('event', evt);
+  socket.on('event', (evt) => {
+    if (!authed) return;
+    if (!evt || !evt.family) return;
+    // Legg på serversidens tidsstempel for "last write wins"
+    evt.serverTs = Date.now();
+    io.to(`family:${String(evt.family)}`).emit('event', evt);
+  });
 });
 
-const PORT = process.env.PORT || 3000; // DO NOT hardcode 10000
+const PORT = process.env.PORT || 3000; // Ikke hardkod 10000 – Render setter PORT
 server.listen(PORT, () => console.log('listening on ' + PORT));
